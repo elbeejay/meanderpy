@@ -84,9 +84,9 @@ class ChannelBelt3D:
         self.channels = channels
 
     def plot_xsection(self, xsec, colors, ve):
-        """method for plotting a cross section through a 3D model; also plots map of 
+        """method for plotting a cross section through a 3D model; also plots map of
         basal erosional surface and map of final geomorphic surface
-        xsec - location of cross section along the x-axis (in pixel/ voxel coordinates) 
+        xsec - location of cross section along the x-axis (in pixel/ voxel coordinates)
         colors - list of RGB values that define the colors for different facies
         ve - vertical exaggeration"""
         strat = self.strat
@@ -97,8 +97,8 @@ class ChannelBelt3D:
         Xv = dx * np.arange(0,r)
         for xloc in range(xsec,xsec+1,1):
             for i in range(0,ts-1,3):
-                X1 = np.concatenate((Xv, Xv[::-1]))  
-                Y1 = np.concatenate((strat[:,xloc,i], strat[::-1,xloc,i+1])) 
+                X1 = np.concatenate((Xv, Xv[::-1]))
+                Y1 = np.concatenate((strat[:,xloc,i], strat[::-1,xloc,i+1]))
                 Y2 = np.concatenate((strat[:,xloc,i+1], strat[::-1,xloc,i+2]))
                 Y3 = np.concatenate((strat[:,xloc,i+2], strat[::-1,xloc,i+3]))
                 if self.model_type == 'submarine':
@@ -117,7 +117,7 @@ class ChannelBelt3D:
         ax2.contour(strat[:,:,ts-1],100,colors='k',linestyles='solid',linewidths=0.1,alpha=0.4)
         ax2.plot([xloc, xloc],[0,r],'k',linewidth=2)
         ax2.axis([0,c,0,r])
-        ax2.set_aspect('equal', adjustable='box')        
+        ax2.set_aspect('equal', adjustable='box')
         ax2.set_title('final geomorphic surface')
         ax2.tick_params(bottom=False,top=False,left=False,right=False,labelbottom=False,labelleft=False)
         fig3 = plt.figure()
@@ -144,7 +144,7 @@ class ChannelBelt:
         self.cl_times = cl_times
         self.cutoff_times = cutoff_times
 
-    def migrate(self,nit,saved_ts,deltas,pad,crdist,Cf,kl,kv,dt,dens,t1,t2,t3,aggr_factor,*D):
+    def migrate(self,nit,saved_ts,deltas,pad,crdist,Cf,kl,kv,dt,dens,t1,t2,t3,aggr_factor,diapir=None,*D):
         """function for computing migration rates along channel centerlines and moving the centerlines accordingly
         inputs:
         nit - number of iterations
@@ -161,11 +161,12 @@ class ChannelBelt:
         t2 - time step when lateral migration starts
         t3 - time step when aggradation starts
         aggr_factor - aggradation factor
-        D - channel depth (m)"""
+        D - channel depth (m)
+        diapir - 2D array with 1s indicating diapir location"""
         channel = self.channels[-1] # first channel is the same as last channel of input
         x = channel.x; y = channel.y; z = channel.z
         W = channel.W;
-        if len(D)==0: 
+        if len(D)==0:
             D = channel.D
         else:
             D = D[0]
@@ -186,7 +187,7 @@ class ChannelBelt:
         gamma = 2.5 # from Ikeda et al., 1981 and Howard and Knutson, 1984
         for itn in range(nit): # main loop
             update_progress(itn/nit)
-            x, y = migrate_one_step(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma)
+            x, y = migrate_one_step_w_diapir(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma,diapir)
             # x, y = migrate_one_step_w_bias(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma)
             x,y,z,xc,yc,zc = cut_off_cutoffs(x,y,z,s,crdist,deltas) # find and execute cutoffs
             x,y,z,dx,dy,dz,ds,s = resample_centerline(x,y,z,deltas) # resample centerline
@@ -204,7 +205,7 @@ class ChannelBelt:
                     z = z # no change in z
             if (itn>t3): # aggradation
                 if np.min(np.abs(slope))!=0: # if slope is not zero
-                    z = z + kv*dens*9.81*D*slope*dt - aggr_factor*kv*dens*9.81*D*np.mean(slope)*dt 
+                    z = z + kv*dens*9.81*D*slope*dt - aggr_factor*kv*dens*9.81*D*np.mean(slope)*dt
                 else:
                     z = z + aggr_factor*dt
             if len(xc)>0: # save cutoff data
@@ -240,7 +241,7 @@ class ChannelBelt:
         ymax = ymax+2*self.channels[0].W # add a bit of space on top and bottom
         ymin = -1*ymax
         # size figure so that its size matches the size of the model:
-        fig = plt.figure(figsize=(20,(ymax-ymin)*20/(xmax-xmin))) 
+        fig = plt.figure(figsize=(20,(ymax-ymin)*20/(xmax-xmin)))
         if plot_type == 'morph':
             pb_crit = len(times[times<times[-1]-pb_age])/float(len(times))
             ob_crit = len(times[times<times[-1]-ob_age])/float(len(times))
@@ -337,7 +338,7 @@ class ChannelBelt:
 
     def build_3d_model(self,model_type,h_mud,levee_width,h,w,bth,dcr,dx,delta_s,starttime,endtime,xmin,xmax,ymin,ymax):
         """method for building 3D model from set of centerlines (that are part of a ChannelBelt object)
-        Inputs: 
+        Inputs:
         model_type - model type ('fluvial' or 'submarine')
         h_mud - maximum thickness of overbank mud
         levee_width - width of overbank mud
@@ -350,18 +351,18 @@ class ChannelBelt:
         starttime - age of centerline that will be used as the first centerline in the model
         endtime - age of centerline that will be used as the last centerline in the model
         xmin,xmax,ymin,ymax - x and y coordinates that define the model domain; if xmin is set to zero,
-        a plot of the centerlines is generated and the model domain has to be defined by clicking its upper 
+        a plot of the centerlines is generated and the model domain has to be defined by clicking its upper
         left and lower right corners
         Returns: a ChannelBelt3D object
         """
         sclt = np.array(self.cl_times)
-        ind1 = np.where(sclt>=starttime)[0][0] 
+        ind1 = np.where(sclt>=starttime)[0][0]
         ind2 = np.where(sclt<=endtime)[0][-1]
         sclt = sclt[ind1:ind2+1]
         channels = self.channels[ind1:ind2+1]
         cot = np.array(self.cutoff_times)
         if (len(cot)>0) & (len(np.where(cot>=starttime)[0])>0) & (len(np.where(cot<=endtime)[0])>0):
-            cfind1 = np.where(cot>=starttime)[0][0] 
+            cfind1 = np.where(cot>=starttime)[0][0]
             cfind2 = np.where(cot<=endtime)[0][-1]
             cot = cot[cfind1:cfind2+1]
             cutoffs = self.cutoffs[cfind1:cfind2+1]
@@ -496,7 +497,7 @@ def resample_centerline(x,y,z,deltas):
     dx, dy, dz, ds, s = compute_derivatives(x,y,z) # compute derivatives
     # resample centerline so that 'deltas' is roughly constant
     # [parametric spline representation of curve; note that there is *no* smoothing]
-    tck, u = scipy.interpolate.splprep([x,y,z],s=0) 
+    tck, u = scipy.interpolate.splprep([x,y,z],s=0)
     unew = np.linspace(0,1,1+int(round(s[-1]/deltas))) # vector for resampling
     out = scipy.interpolate.splev(unew,tck) # resampling
     x, y, z = out[0], out[1], out[2] # assign new coordinate values
@@ -517,9 +518,78 @@ def migrate_one_step(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma):
     dy_ds = dy[pad1:ns-pad+1]/ds[pad1:ns-pad+1]
     dx_ds = dx[pad1:ns-pad+1]/ds[pad1:ns-pad+1]
     # adjust x and y coordinates (this *is* the migration):
-    x[pad1:ns-pad+1] = x[pad1:ns-pad+1] + R1[pad1:ns-pad+1]*dy_ds*dt  
-    y[pad1:ns-pad+1] = y[pad1:ns-pad+1] - R1[pad1:ns-pad+1]*dx_ds*dt 
+    x[pad1:ns-pad+1] = x[pad1:ns-pad+1] + R1[pad1:ns-pad+1]*dy_ds*dt
+    y[pad1:ns-pad+1] = y[pad1:ns-pad+1] - R1[pad1:ns-pad+1]*dx_ds*dt
     return x,y
+
+def migrate_one_step_w_diapir(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma,diapir):
+    ns=len(x)
+    curv = compute_curvature(x,y)
+    dx, dy, dz, ds, s = compute_derivatives(x,y,z)
+    sinuosity = s[-1]/(x[-1]-x[0])
+    curv = W*curv # dimensionless curvature
+    R0 = kl*curv # simple linear relationship between curvature and nominal migration rate
+    alpha = k*2*Cf/D # exponent for convolution function G
+    R1 = compute_migration_rate(pad,ns,ds,alpha,omega,gamma,R0)
+    R1 = sinuosity**(-2/3.0)*R1
+    # calculate new centerline coordinates:
+    dy_ds = dy[pad1:ns-pad+1]/ds[pad1:ns-pad+1]
+    dx_ds = dx[pad1:ns-pad+1]/ds[pad1:ns-pad+1]
+    # adjust x and y coordinates (this *is* the migration):
+    x[pad1:ns-pad+1] = x[pad1:ns-pad+1] + R1[pad1:ns-pad+1]*dy_ds*dt
+    y[pad1:ns-pad+1] = y[pad1:ns-pad+1] - R1[pad1:ns-pad+1]*dx_ds*dt
+    if diapir is not None:
+        x[pad1:ns-pad+1], y[pad1:ns-pad+1] = find_good_location(diapir, x, y,
+                                                                pad1, ns-pad+1)
+    return x,y
+
+def find_good_location(diapir, x, y, ind1, ind2):
+    """
+    NEED TO CHANGE DIAPIR DEFINITION TO BE CIRCLE COORDS - NOT AN ARRAY
+    Find an acceptable location for the x,y coordinate.
+
+    If the proposed x,y coordinate is on a diapir, we have to move it.
+
+    Parameters
+    ----------
+    diapir : list
+        First value is radius, second is a tuple with origin coords.
+
+    x : ndarray
+        1D array of x-coordinates
+
+    y : ndarray
+        1D array of y-coordinates
+
+    ind1 : int
+        1st index value
+
+    ind2 : int
+        2nd index value
+
+    Returns
+    -------
+    x : ndarray
+        1D array of x-coordinates that don't interfere with the diapir
+
+    y : ndarray
+        1D array of y-coordinates that don't interfere with the diapir
+
+    """
+    for i in range(ind1, ind2):
+        # check if within diapir, adjust up/down depending on location
+        x1 = diapir[1][0] - x[i]
+        y1 = diapir[1][1] - y[i]
+        c = np.sqrt(x1**2 + y1**2)
+        # condition above
+        if c < diapir[0] and y[i] > diapir[1][1]:
+            y[i] = y1 + diapir[0]
+        elif c < diapir[0] and y[i] < diapir[1][1]:
+            # condition below
+            y[i] = y1 - diapir[0]
+
+    return x[ind1:ind2], y[ind1:ind2]
+
 
 def migrate_one_step_w_bias(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma):
     ns=len(x)
@@ -563,6 +633,12 @@ def generate_initial_channel(W,D,Sl,deltas,pad,n_bends):
     z = np.linspace(0,deltaz,len(x))[::-1] # z coordinate
     return Channel(x,y,z,W,D)
 
+def generate_diapir(radius, xmin, xmax, ymin, ymax):
+    """Generate origin for diapir-standin which is just a circle."""
+    origin = (np.random.randint(xmin, xmax), np.random.randint(ymin, ymax))
+    diapir = [radius, origin]
+    return diapir
+
 @numba.jit(nopython=True) # use Numba to speed up the heaviest computation
 def compute_migration_rate(pad,ns,ds,alpha,omega,gamma,R0):
     """compute migration rate as weighted sum of upstream curvatures
@@ -577,7 +653,7 @@ def compute_migration_rate(pad,ns,ds,alpha,omega,gamma,R0):
     if pad1<5:
         pad1 = 5
     for i in range(pad1,ns-pad):
-        si2 = np.hstack((np.array([0]),np.cumsum(ds[i-1::-1])))  # distance along centerline, backwards from current point 
+        si2 = np.hstack((np.array([0]),np.cumsum(ds[i-1::-1])))  # distance along centerline, backwards from current point
         G = np.exp(-alpha*si2) # convolution vector
         R1[i] = omega*R0[i] + gamma*np.sum(R0[i::-1]*G)/np.sum(G) # main equation
     return R1
@@ -591,8 +667,8 @@ def compute_derivatives(x,y,z):
     ds - distances between consecutive points along the curve
     s - cumulative distance along the curve"""
     dx = np.gradient(x) # first derivatives
-    dy = np.gradient(y)   
-    dz = np.gradient(z)   
+    dy = np.gradient(y)
+    dz = np.gradient(z)
     ds = np.sqrt(dx**2+dy**2+dz**2)
     s = np.hstack((0,np.cumsum(ds[1:])))
     return dx, dy, dz, ds, s
@@ -607,9 +683,9 @@ def compute_curvature(x,y):
     s - cumulative distance along the curve
     curvature - curvature of the curve (in 1/units of x and y)"""
     dx = np.gradient(x) # first derivatives
-    dy = np.gradient(y)      
-    ddx = np.gradient(dx) # second derivatives 
-    ddy = np.gradient(dy) 
+    dy = np.gradient(y)
+    ddx = np.gradient(dx) # second derivatives
+    ddy = np.gradient(dy)
     curvature = (dx*ddy-dy*ddx)/((dx**2+dy**2)**1.5)
     return curvature
 
@@ -640,7 +716,7 @@ def kth_diag_indices(a,k):
         return rows[k:], cols[:-k]
     else:
         return rows, cols
-    
+
 def find_cutoffs(x,y,crdist,deltas):
     """function for identifying locations of cutoffs along a centerline
     and the indices of the segments that will become part of the oxbows
@@ -679,7 +755,7 @@ def cut_off_cutoffs(x,y,z,s,crdist,deltas):
         x = np.hstack((x[:ind1[0]+1],x[ind2[0]:])) # x coordinates after cutoff
         y = np.hstack((y[:ind1[0]+1],y[ind2[0]:])) # y coordinates after cutoff
         z = np.hstack((z[:ind1[0]+1],z[ind2[0]:])) # z coordinates after cutoff
-        ind1, ind2 = find_cutoffs(x,y,crdist,deltas)       
+        ind1, ind2 = find_cutoffs(x,y,crdist,deltas)
     return x,y,z,xc,yc,zc
 
 def get_channel_banks(x,y,W):
@@ -693,7 +769,7 @@ def get_channel_banks(x,y,W):
     x2 = x.copy()
     y2 = y.copy()
     ns = len(x)
-    dx = np.diff(x); dy = np.diff(y) 
+    dx = np.diff(x); dy = np.diff(y)
     ds = np.sqrt(dx**2+dy**2)
     x1[:-1] = x[:-1] + 0.5*W*np.diff(y)/ds
     y1[:-1] = y[:-1] - 0.5*W*np.diff(x)/ds
@@ -722,7 +798,7 @@ def dist_map(x,y,z,xmin,xmax,ymin,ymax,dx,delta_s):
     x, y, z - x,y,z centerline coordinates clipped to the 3D model domain"""
     y = y[(x>xmin) & (x<xmax)]
     z = z[(x>xmin) & (x<xmax)]
-    x = x[(x>xmin) & (x<xmax)] 
+    x = x[(x>xmin) & (x<xmax)]
     dummy,dy,dz,ds,s = compute_derivatives(x,y,z)
     if len(np.where(ds>2*delta_s)[0])>0:
         inds = np.where(ds>2*delta_s)[0]
@@ -734,7 +810,7 @@ def dist_map(x,y,z,xmin,xmax,ymin,ymax,dx,delta_s):
         if end_ind<len(x):
             x = x[start_ind:end_ind]
             y = y[start_ind:end_ind]
-            z = z[start_ind:end_ind] 
+            z = z[start_ind:end_ind]
         else:
             x = x[start_ind:]
             y = y[start_ind:]
@@ -757,16 +833,16 @@ def dist_map(x,y,z,xmin,xmax,ymin,ymax,dx,delta_s):
     pix = np.array(img)
     cl = pix[:,:,0]
     cl[cl==255] = 1 # set background to 1 (centerline is 0)
-    y_pix,x_pix = np.where(cl==0) 
+    y_pix,x_pix = np.where(cl==0)
     x_pix,y_pix = order_cl_pixels(x_pix,y_pix)
     # This next block of code is kind of a hack. Looking for, and eliminating, 'bad' pixels.
     img = np.array(img)
     img = img[:,:,0]
-    img[img==255] = 1 
+    img[img==255] = 1
     img1 = morphology.binary_dilation(img, morphology.square(2)).astype(np.uint8)
     if len(np.where(img1==0)[0])>0:
         x_pix, y_pix = eliminate_bad_pixels(img,img1)
-        x_pix,y_pix = order_cl_pixels(x_pix,y_pix) 
+        x_pix,y_pix = order_cl_pixels(x_pix,y_pix)
     img1 = morphology.binary_dilation(img, np.array([[1,0,1],[1,1,1]],dtype=np.uint8)).astype(np.uint8)
     if len(np.where(img1==0)[0])>0:
         x_pix, y_pix = eliminate_bad_pixels(img,img1)
@@ -791,7 +867,7 @@ def dist_map(x,y,z,xmin,xmax,ymin,ymax,dx,delta_s):
     snew[snew<s[0]]=s[0]
     z_pix = f(snew)
     # create z_map:
-    z_map = np.zeros(np.shape(cl_dist)) 
+    z_map = np.zeros(np.shape(cl_dist))
     z_map[y_pix,x_pix]=z_pix
     xinds=inds[1,:,:]
     yinds=inds[0,:,:]
@@ -859,7 +935,7 @@ def mud_surface(h_mud,levee_width,cl_dist,w,z_map,topo):
     surf2 = (2*h_mud/levee_width)*cl_dist+h_mud;
     surf = np.minimum(surf1,surf2)
     # surface for 'eroding' the central part of the mud layer:
-    surf3 = h_mud + (4*1.5*h_mud/w**2)*(cl_dist+w*0.5)*(cl_dist-w*0.5) 
+    surf3 = h_mud + (4*1.5*h_mud/w**2)*(cl_dist+w*0.5)*(cl_dist-w*0.5)
     surf = np.minimum(surf,surf3)
     surf[surf<0] = 0; # eliminate negative thicknesses
     return surf
@@ -879,7 +955,7 @@ def topostrat(topo):
 
 def cl_dist_map(x,y,z,xmin,xmax,ymin,ymax,dx):
     """function for centerline rasterization and distance map calculation (does not return zmap)
-    used for cutoffs only 
+    used for cutoffs only
     inputs:
     x,y,z - coordinates of centerline
     xmin, xmax, ymin, ymax - x and y coordinates that define the area of interest
@@ -890,7 +966,7 @@ def cl_dist_map(x,y,z,xmin,xmax,ymin,ymax,dx):
     """
     y = y[(x>xmin) & (x<xmax)]
     z = z[(x>xmin) & (x<xmax)]
-    x = x[(x>xmin) & (x<xmax)]    
+    x = x[(x>xmin) & (x<xmax)]
     xdist = xmax - xmin
     ydist = ymax - ymin
     iwidth = int((xmax-xmin)/dx)
@@ -950,7 +1026,7 @@ def plot_chb(chb, plot_type, pb_age, ob_age, end_time, n_channels, ax, cmap_name
         ob_age - age of oxbow lakes (in years) at which they get covered by vegetation
         end_time - age of last channel to be plotted (in years)
         ax -
-        cmap_name - 
+        cmap_name -
         water_color - """
         cot = np.array(chb.cutoff_times)
         sclt = np.array(chb.cl_times)
@@ -969,7 +1045,7 @@ def plot_chb(chb, plot_type, pb_age, ob_age, end_time, n_channels, ax, cmap_name
         ymax = ymax+2*chb.channels[0].W # add a bit of space on top and bottom
         ymin = -1*ymax
         # size figure so that its size matches the size of the model:
-        # fig = plt.figure(figsize=(20,(ymax-ymin)*20/(xmax-xmin))) 
+        # fig = plt.figure(figsize=(20,(ymax-ymin)*20/(xmax-xmin)))
         if plot_type == 'morph':
             pb_crit = len(times[times<times[-1]-pb_age])/float(len(times))
             ob_crit = len(times[times<times[-1]-ob_age])/float(len(times))
