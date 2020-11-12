@@ -218,7 +218,7 @@ class ChannelBelt:
                 channel = Channel(x,y,z,W,D) # create channel object
                 self.channels.append(channel)
 
-    def plot(self, plot_type, pb_age, ob_age, end_time, n_channels):
+    def plot(self, plot_type, pb_age, ob_age, end_time, n_channels, diapir=None):
         """plot ChannelBelt object
         plot_type - can be either 'strat' (for stratigraphic plot) or 'morph' (for morphologic plot)
         pb_age - age of point bars (in years) at which they get covered by vegetation
@@ -296,9 +296,12 @@ class ChannelBelt:
         plt.axis('equal')
         plt.xlim(xmin,xmax)
         plt.ylim(ymin,ymax)
+        if diapir is not None:
+            x_pt, y_pt = points_in_circle_np(diapir[0], diapir[1][0], diapir[1][1])
+            plt.fill(x_pt, y_pt, 'r')
         return fig
-
-    def create_movie(self, xmin, xmax, plot_type, filename, dirname, pb_age, ob_age, scale, end_time, n_channels):
+    
+    def create_movie(self, xmin, xmax, plot_type, filename, dirname, pb_age, ob_age, scale, end_time, n_channels, diapir):
         """method for creating movie frames (PNG files) that capture the plan-view evolution of a channel belt through time
         movie has to be assembled from the PNG file after this method is applied
         xmin - value of x coodinate on the left side of frame
@@ -322,7 +325,7 @@ class ChannelBelt:
         ymax = ymax+2*channels[0].W # add a bit of space on top and bottom
         ymin = -1*ymax
         for i in range(0,len(sclt)):
-            fig = self.plot(plot_type, pb_age, ob_age, sclt[i], n_channels)
+            fig = self.plot(plot_type, pb_age, ob_age, sclt[i], n_channels, diapir)
             fig_height = scale*fig.get_figheight()
             fig_width = (xmax-xmin)*fig_height/(ymax-ymin)
             fig.set_figwidth(fig_width)
@@ -492,6 +495,18 @@ class ChannelBelt:
             facies_code = {0:'oxbow', 1:'channel sand', 2:'levee'}
         chb_3d = ChannelBelt3D(model_type,topo,strat,facies,facies_code,dx,channels3D)
         return chb_3d, xmin, xmax, ymin, ymax
+    
+def points_in_circle_np(radius, x0=0, y0=0):
+    """From https://stackoverflow.com/questions/49551440/python-all-points-on-circle-given-radius-and-center"""
+    x_ = np.arange(x0 - radius - 1, x0 + radius + 1, dtype=int)
+    y_ = np.arange(y0 - radius - 1, y0 + radius + 1, dtype=int)
+    x, y = np.where((x_[:,np.newaxis] - x0)**2 + (y_ - y0)**2 <= radius**2)
+    x_pt = []
+    y_pt = []
+    for x, y in zip(x_[x], y_[y]):
+        x_pt.append(x)
+        y_pt.append(y)
+    return x_pt, y_pt
 
 def resample_centerline(x,y,z,deltas):
     dx, dy, dz, ds, s = compute_derivatives(x,y,z) # compute derivatives
@@ -539,13 +554,11 @@ def migrate_one_step_w_diapir(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma,diapir):
     x[pad1:ns-pad+1] = x[pad1:ns-pad+1] + R1[pad1:ns-pad+1]*dy_ds*dt
     y[pad1:ns-pad+1] = y[pad1:ns-pad+1] - R1[pad1:ns-pad+1]*dx_ds*dt
     if diapir is not None:
-        x[pad1:ns-pad+1], y[pad1:ns-pad+1] = find_good_location(diapir, x, y,
-                                                                pad1, ns-pad+1)
+        y = find_good_location(diapir, x, y)
     return x,y
 
-def find_good_location(diapir, x, y, ind1, ind2):
+def find_good_location(diapir, x, y):
     """
-    NEED TO CHANGE DIAPIR DEFINITION TO BE CIRCLE COORDS - NOT AN ARRAY
     Find an acceptable location for the x,y coordinate.
 
     If the proposed x,y coordinate is on a diapir, we have to move it.
@@ -561,34 +574,49 @@ def find_good_location(diapir, x, y, ind1, ind2):
     y : ndarray
         1D array of y-coordinates
 
-    ind1 : int
-        1st index value
-
-    ind2 : int
-        2nd index value
-
     Returns
     -------
-    x : ndarray
-        1D array of x-coordinates that don't interfere with the diapir
-
     y : ndarray
         1D array of y-coordinates that don't interfere with the diapir
 
     """
-    for i in range(ind1, ind2):
-        # check if within diapir, adjust up/down depending on location
-        x1 = diapir[1][0] - x[i]
-        y1 = diapir[1][1] - y[i]
-        c = np.sqrt(x1**2 + y1**2)
-        # condition above
-        if c < diapir[0] and y[i] > diapir[1][1]:
-            y[i] = y1 + diapir[0]
-        elif c < diapir[0] and y[i] < diapir[1][1]:
-            # condition below
-            y[i] = y1 - diapir[0]
+    ### THIS IS STILL BROKEN
+    # vectorized version
+    x1 = np.ones_like(x)*diapir[1][0]
+    x1 = x1 - x
+    y1 = np.ones_like(y)*diapir[1][1]
+    y1 = y1 - y
+    c_vals = np.sqrt(x1**2 + y1**2)
+    # binary array with 1s in indices that need to change
+    cbin = np.where(c_vals < diapir[0], 1, 0)
+    if np.sum(cbin) > 0:
+        # indices of non-zero values
+        c_inds = np.nonzero(cbin)  
+        if len(c_inds[0]) > 0 and x1[c_inds[0][0]] >= diapir[0]:
+            # upper case
+            case = 1
+        elif len(c_inds[0]) > 0:
+            # lower case
+            case = -1
+        else:
+            # nothing
+            case = 0
+        # apply to shift coords that need to be shifted
+        new_y = [y1[i]+case*np.sqrt(c_vals[i]**2 - x1[i]**2) for i in c_inds]
+        # smooth new coords if there are a bunch of them
+        if np.sum(cbin) > 5:
+            y[c_inds] = new_y
+            y[c_inds[0][0]-5:c_inds[0][-1]+5] = movingaverage(y[c_inds[0][0]-5:c_inds[0][-1]+5], 5)
+#         # weighted average new coords with old ones
+#         y[c_inds] = 0.5*new_y[0] + 0.5*y[c_inds]
+    #return amended y values
+    return y
 
-    return x[ind1:ind2], y[ind1:ind2]
+
+def movingaverage(interval, window_size):
+    """From https://stackoverflow.com/questions/11352047/finding-moving-average-from-data-points-in-python/11352216#11352216"""
+    window = np.ones(int(window_size))/float(window_size)
+    return np.convolve(interval, window, 'same') 
 
 
 def migrate_one_step_w_bias(x,y,z,W,kl,dt,k,Cf,D,pad,pad1,omega,gamma):
